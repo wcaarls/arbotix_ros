@@ -73,6 +73,7 @@ class DynamixelServo(Joint):
         self.enabled = True                     # can we take commands?
         self.active = False                     # are we under torque control?
         self.last = rospy.Time.now()
+        self.timeout = 0
 
         self.reads = 0.0                        # number of reads
         self.errors = 0                         # number of failed reads
@@ -84,6 +85,7 @@ class DynamixelServo(Joint):
         
         # ROS interfaces
         rospy.Subscriber(name+'/command', Float64, self.commandCb)
+        rospy.Subscriber(name+'/cmd_vel', Float64, self.commandVelocityCb)
         rospy.Service(name+'/relax', Relax, self.relaxCb)
         rospy.Service(name+'/enable', Enable, self.enableCb)
         rospy.Service(name+'/set_speed', SetSpeed, self.setSpeedCb)
@@ -91,6 +93,7 @@ class DynamixelServo(Joint):
     def interpolate(self, frame):
         """ Get the new position to move to, in ticks. """
         if self.enabled and self.active and self.dirty:
+            self.timeout = 0
             # compute command, limit velocity
             cmd = self.desired - self.last_cmd
             if cmd > self.max_speed/frame:
@@ -118,6 +121,11 @@ class DynamixelServo(Joint):
             if self.device.fake:
                 self.velocity = 0.0
                 self.last = rospy.Time.now()
+            elif self.timeout and rospy.Time.now() > self.timeout:
+                # Stop automatically in velocity control mode
+                rospy.logdebug("Stopping due to velocity command timeout")
+                self.device.setPosition(self.id, int(self.angleToTicks(self.position)))
+                self.timeout = 0
             return None
 
     def setCurrentFeedback(self, reading):
@@ -236,10 +244,40 @@ class DynamixelServo(Joint):
             if self.controller and self.controller.active():
                 # Under and action control, do not interfere
                 return
-            elif self.desired != req.data or not self.active:
+            elif self.position != req.data or not self.active:
                 self.dirty = True
                 self.active = True
                 self.desired = req.data
+                
+    def commandVelocityCb(self, req):
+        """ Float64 style command velocity input. """
+        if self.enabled:
+            if self.controller and self.controller.active():
+                # Under and action control, do not interfere
+                return
+            else:
+                # Go to endstop with specified velocity
+                speed = min(abs(req.data), self.max_speed)
+                if speed == 0:
+                    speed = self.max_speed
+                speed = int(self.speedToTicks(speed))
+                
+                if req.data < 0:
+                    pos = self.min_angle
+                elif req.data > 0:
+                    pos = self.max_angle
+                else:
+                    pos = self.position
+                pos = int(self.angleToTicks(pos))
+                    
+                self.device.setSpeed(self.id, speed)
+                self.device.setPosition(self.id, pos)
+#                self.device.write(self.id, P_GOAL_POSITION_L, [pos%256, pos>>8, speed%256, speed>>8])
+                
+                # Inhibit regular position update
+                self.dirty = False
+                self.active = True
+                self.timeout = rospy.Time.now() + rospy.Duration(0.5)
                 
     def setSpeedCb(self, req):
         """ Set servo speed. Requested speed is in radians per second.
