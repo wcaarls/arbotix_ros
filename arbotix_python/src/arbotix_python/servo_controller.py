@@ -257,19 +257,18 @@ class DynamixelServo(Joint):
                 return
             else:
                 # Go to endstop with specified velocity
-                speed = min(abs(req.data), self.max_speed)
+                speed = int(self.speedToTicks(min(abs(req.data), self.max_speed)))
                 if speed == 0:
-                    speed = self.max_speed
-                speed = int(self.speedToTicks(speed))
-                
-                if req.data < 0:
-                    pos = self.min_angle
-                elif req.data > 0:
-                    pos = self.max_angle
-                else:
+                    speed = 1
                     pos = self.position
+                else:
+                    if req.data < 0:
+                        pos = self.min_angle
+                    else:
+                        pos = self.max_angle
+
                 pos = int(self.angleToTicks(pos))
-                    
+                
                 self.device.setSpeed(self.id, speed)
                 self.device.setPosition(self.id, pos)
 #                self.device.write(self.id, P_GOAL_POSITION_L, [pos%256, pos>>8, speed%256, speed>>8])
