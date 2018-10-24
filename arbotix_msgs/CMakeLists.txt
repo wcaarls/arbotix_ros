@@ -6,6 +6,7 @@ find_package(catkin REQUIRED COMPONENTS message_generation std_msgs)
 add_message_files(FILES
                   Analog.msg
                   Digital.msg
+                  JointVelocities.msg
                  )
 
 add_service_files(FILES
